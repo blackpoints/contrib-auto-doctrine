@@ -1,5 +1,5 @@
 {
-    "name": "blackpoints/opentelemetry-auto-doctrine",
+    "name": "opentelemetry/opentelemetry-auto-doctrine",
     "description": "OpenTelemetry auto-instrumentation for Doctrine",
     "keywords": [
         "opentelemetry",
@@ -39,11 +39,6 @@
         "files": [
             "_register.php"
         ]
-    },
-    "autoload-dev": {
-        "psr-4": {
-            "OpenTelemetry\\Tests\\Instrumentation\\Doctrine\\": "tests/"
-        }
     },
     "config": {
         "allow-plugins": {

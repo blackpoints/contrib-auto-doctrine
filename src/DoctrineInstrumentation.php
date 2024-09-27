@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Blackpoints\Contrib\Instrumentation\Doctrine;
+namespace Opentelemetry\Contrib\Instrumentation\Doctrine;
 
 use OpenTelemetry\API\Instrumentation\CachedInstrumentation;
 use OpenTelemetry\API\Trace\Span;
@@ -10,45 +10,35 @@ use OpenTelemetry\API\Trace\SpanBuilderInterface;
 use OpenTelemetry\API\Trace\SpanKind;
 use OpenTelemetry\API\Trace\StatusCode;
 use OpenTelemetry\Context\Context;
+use OpenTelemetry\SemConv\TraceAttributes;
+use Throwable;
 
 use function OpenTelemetry\Instrumentation\hook;
 
-use OpenTelemetry\SemConv\TraceAttributes;
-use PDO;
-use PDOStatement;
-use Throwable;
-
-class PDOInstrumentation
+class DoctrineInstrumentation
 {
-    public const NAME = 'pdo';
+    public const NAME = 'doctrine';
 
     public static function register(): void
     {
-        $instrumentation = new CachedInstrumentation(
-            'io.opentelemetry.contrib.php.pdo',
-            null,
-            'https://opentelemetry.io/schemas/1.24.0'
-        );
-        $pdoTracker = new PDOTracker();
+        $instrumentation = new CachedInstrumentation('io.opentelemetry.contrib.php.doctrine');
+        $pdoTracker = new DoctrineTracker();
 
         hook(
-            PDO::class,
-            '__construct',
-            pre: static function (PDO $pdo, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($instrumentation) {
-                /** @psalm-suppress ArgumentTypeCoercion */
-                $builder = self::makeBuilder($instrumentation, 'PDO::__construct', $function, $class, $filename, $lineno)
+            \Doctrine\DBAL\Driver::class,
+            'connect',
+            pre: static function (\Doctrine\DBAL\Driver $driver, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($instrumentation) {
+                $builder = self::makeBuilder($instrumentation, 'Doctrine\DBAL\Driver::connect', $function, $class, $filename, $lineno)
                     ->setSpanKind(SpanKind::KIND_CLIENT);
-                if ($class === PDO::class) {
-                    //@todo split params[0] into host + port, replace deprecated trace attribute
-                    $builder
-                        ->setAttribute(TraceAttributes::DB_CONNECTION_STRING, $params[0] ?? 'unknown')
-                        ->setAttribute(TraceAttributes::DB_USER, $params[1] ?? 'unknown');
-                }
+                $builder
+                    ->setAttribute(TraceAttributes::SERVER_ADDRESS, $params[0] ?? 'unknown')
+                    ->setAttribute(TraceAttributes::SERVER_PORT, $params[0] ?? 'unknown')
+                    ->setAttribute(TraceAttributes::DB_USER, $params[1] ?? 'unknown');
                 $parent = Context::getCurrent();
                 $span = $builder->startSpan();
                 Context::storage()->attach($span->storeInContext($parent));
             },
-            post: static function (PDO $pdo, array $params, mixed $statement, ?Throwable $exception) use ($pdoTracker) {
+            post: static function (\Doctrine\DBAL\Driver $driver, array $params, \Doctrine\DBAL\Driver\Connection $connection, ?Throwable $exception) use ($pdoTracker) {
                 $scope = Context::storage()->scope();
                 if (!$scope) {
                     return;
@@ -57,184 +47,130 @@ class PDOInstrumentation
 
                 $dsn = $params[0] ?? '';
 
-                $attributes = $pdoTracker->trackPdoAttributes($pdo, $dsn);
-                $span->setAttributes($attributes);
+                //$attributes = $pdoTracker->trackPdoAttributes($pdo, $dsn);
+                //$span->setAttributes($attributes);
 
                 self::end($exception);
             }
         );
 
         hook(
-            PDO::class,
+            \Doctrine\DBAL\Driver\Connection::class,
             'query',
-            pre: static function (PDO $pdo, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($pdoTracker, $instrumentation) {
-                /** @psalm-suppress ArgumentTypeCoercion */
-                $builder = self::makeBuilder($instrumentation, 'PDO::query', $function, $class, $filename, $lineno)
+            pre: static function (\Doctrine\DBAL\Driver\Connection $connection, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($pdoTracker, $instrumentation) {
+                $builder = self::makeBuilder($instrumentation, 'Doctrine\DBAL\Driver\Connection::query', $function, $class, $filename, $lineno)
                     ->setSpanKind(SpanKind::KIND_CLIENT);
-                if ($class === PDO::class) {
-                    $builder->setAttribute(TraceAttributes::DB_STATEMENT, $params[0] ?? 'undefined');
-                }
+                $builder->setAttribute(TraceAttributes::DB_QUERY_TEXT, $params[0] ?? 'undefined');
                 $parent = Context::getCurrent();
                 $span = $builder->startSpan();
 
-                $attributes = $pdoTracker->trackedAttributesForPdo($pdo);
-                $span->setAttributes($attributes);
+                //$attributes = $pdoTracker->trackedAttributesForPdo($pdo);
+                //$span->setAttributes($attributes);
 
                 Context::storage()->attach($span->storeInContext($parent));
             },
-            post: static function (PDO $pdo, array $params, mixed $statement, ?Throwable $exception) {
+            post: static function (\Doctrine\DBAL\Driver\Connection $connection, array $params, mixed $statement, ?Throwable $exception) {
                 self::end($exception);
             }
         );
 
         hook(
-            PDO::class,
+            \Doctrine\DBAL\Driver\Connection::class,
             'exec',
-            pre: static function (PDO $pdo, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($pdoTracker, $instrumentation) {
-                /** @psalm-suppress ArgumentTypeCoercion */
-                $builder = self::makeBuilder($instrumentation, 'PDO::exec', $function, $class, $filename, $lineno)
+            pre: static function (\Doctrine\DBAL\Driver\Connection $connection, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($pdoTracker, $instrumentation) {
+                $builder = self::makeBuilder($instrumentation, 'Doctrine\DBAL\Driver\Connection::exec', $function, $class, $filename, $lineno)
                     ->setSpanKind(SpanKind::KIND_CLIENT);
-                if ($class === PDO::class) {
-                    $builder->setAttribute(TraceAttributes::DB_STATEMENT, $params[0] ?? 'undefined');
-                }
+                $builder->setAttribute(TraceAttributes::DB_QUERY_TEXT, $params[0] ?? 'undefined');
                 $parent = Context::getCurrent();
                 $span = $builder->startSpan();
 
-                $attributes = $pdoTracker->trackedAttributesForPdo($pdo);
-                $span->setAttributes($attributes);
+                //$attributes = $pdoTracker->trackedAttributesForPdo($pdo);
+                //$span->setAttributes($attributes);
 
                 Context::storage()->attach($span->storeInContext($parent));
             },
-            post: static function (PDO $pdo, array $params, mixed $statement, ?Throwable $exception) {
+            post: static function (\Doctrine\DBAL\Driver\Connection $connection, array $params, mixed $statement, ?Throwable $exception) {
                 self::end($exception);
             }
         );
 
         hook(
-            PDO::class,
+            \Doctrine\DBAL\Driver\Connection::class,
             'prepare',
-            pre: static function (PDO $pdo, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($pdoTracker, $instrumentation) {
-                /** @psalm-suppress ArgumentTypeCoercion */
-                $builder = self::makeBuilder($instrumentation, 'PDO::prepare', $function, $class, $filename, $lineno)
+            pre: static function (\Doctrine\DBAL\Driver\Connection $connection, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($pdoTracker, $instrumentation) {
+                $builder = self::makeBuilder($instrumentation, 'Doctrine\DBAL\Driver\Connection::prepare', $function, $class, $filename, $lineno)
                     ->setSpanKind(SpanKind::KIND_CLIENT);
-                if ($class === PDO::class) {
-                    $builder->setAttribute(TraceAttributes::DB_STATEMENT, $params[0] ?? 'undefined');
-                }
+                $builder->setAttribute(TraceAttributes::DB_QUERY_TEXT, $params[0] ?? 'undefined');
                 $parent = Context::getCurrent();
                 $span = $builder->startSpan();
 
-                $attributes = $pdoTracker->trackedAttributesForPdo($pdo);
-                $span->setAttributes($attributes);
+                //$attributes = $pdoTracker->trackedAttributesForPdo($pdo);
+                //$span->setAttributes($attributes);
 
                 Context::storage()->attach($span->storeInContext($parent));
             },
-            post: static function (PDO $pdo, array $params, mixed $statement, ?Throwable $exception) use ($pdoTracker) {
-                if ($statement instanceof PDOStatement) {
-                    $pdoTracker->trackStatement($statement, $pdo, Span::getCurrent()->getContext());
-                }
+            post: static function (\Doctrine\DBAL\Driver\Connection $connection, array $params, mixed $statement, ?Throwable $exception) use ($pdoTracker) {
+                // if ($statement instanceof PDOStatement) {
+                //     $pdoTracker->trackStatement($statement, $pdo, Span::getCurrent()->getContext());
+                // }
 
                 self::end($exception);
             }
         );
 
         hook(
-            PDO::class,
+            \Doctrine\DBAL\Driver\Connection::class,
             'beginTransaction',
-            pre: static function (PDO $pdo, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($pdoTracker, $instrumentation) {
-                /** @psalm-suppress ArgumentTypeCoercion */
-                $builder = self::makeBuilder($instrumentation, 'PDO::beginTransaction', $function, $class, $filename, $lineno)
+            pre: static function (\Doctrine\DBAL\Driver\Connection $connection, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($pdoTracker, $instrumentation) {
+                $builder = self::makeBuilder($instrumentation, 'Doctrine\DBAL\Driver\Connection::beginTransaction', $function, $class, $filename, $lineno)
                     ->setSpanKind(SpanKind::KIND_CLIENT);
                 $parent = Context::getCurrent();
                 $span = $builder->startSpan();
 
-                $attributes = $pdoTracker->trackedAttributesForPdo($pdo);
-                $span->setAttributes($attributes);
+                // $attributes = $pdoTracker->trackedAttributesForPdo($pdo);
+                // $span->setAttributes($attributes);
 
                 Context::storage()->attach($span->storeInContext($parent));
             },
-            post: static function (PDO $pdo, array $params, mixed $statement, ?Throwable $exception) {
+            post: static function (\Doctrine\DBAL\Driver\Connection $connection, array $params, mixed $statement, ?Throwable $exception) {
                 self::end($exception);
             }
         );
 
         hook(
-            PDO::class,
+            \Doctrine\DBAL\Driver\Connection::class,
             'commit',
-            pre: static function (PDO $pdo, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($pdoTracker, $instrumentation) {
-                /** @psalm-suppress ArgumentTypeCoercion */
-                $builder = self::makeBuilder($instrumentation, 'PDO::commit', $function, $class, $filename, $lineno)
+            pre: static function (\Doctrine\DBAL\Driver\Connection $connection, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($pdoTracker, $instrumentation) {
+                $builder = self::makeBuilder($instrumentation, 'Doctrine\DBAL\Driver\Connection::commit', $function, $class, $filename, $lineno)
                     ->setSpanKind(SpanKind::KIND_CLIENT);
                 $parent = Context::getCurrent();
                 $span = $builder->startSpan();
 
-                $attributes = $pdoTracker->trackedAttributesForPdo($pdo);
-                $span->setAttributes($attributes);
+                // $attributes = $pdoTracker->trackedAttributesForPdo($pdo);
+                // $span->setAttributes($attributes);
 
                 Context::storage()->attach($span->storeInContext($parent));
             },
-            post: static function (PDO $pdo, array $params, mixed $statement, ?Throwable $exception) {
+            post: static function (\Doctrine\DBAL\Driver\Connection $connection, array $params, mixed $statement, ?Throwable $exception) {
                 self::end($exception);
             }
         );
 
         hook(
-            PDO::class,
+            \Doctrine\DBAL\Driver\Connection::class,
             'rollBack',
-            pre: static function (PDO $pdo, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($pdoTracker, $instrumentation) {
-                /** @psalm-suppress ArgumentTypeCoercion */
-                $builder = self::makeBuilder($instrumentation, 'PDO::rollBack', $function, $class, $filename, $lineno)
+            pre: static function (\Doctrine\DBAL\Driver\Connection $connection, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($pdoTracker, $instrumentation) {
+                $builder = self::makeBuilder($instrumentation, 'Doctrine\DBAL\Driver\Connection::rollBack', $function, $class, $filename, $lineno)
                     ->setSpanKind(SpanKind::KIND_CLIENT);
                 $parent = Context::getCurrent();
                 $span = $builder->startSpan();
 
-                $attributes = $pdoTracker->trackedAttributesForPdo($pdo);
-                $span->setAttributes($attributes);
+                // $attributes = $pdoTracker->trackedAttributesForPdo($pdo);
+                // $span->setAttributes($attributes);
 
                 Context::storage()->attach($span->storeInContext($parent));
             },
-            post: static function (PDO $pdo, array $params, mixed $statement, ?Throwable $exception) {
-                self::end($exception);
-            }
-        );
-
-        hook(
-            PDOStatement::class,
-            'fetchAll',
-            pre: static function (PDOStatement $statement, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($pdoTracker, $instrumentation) {
-                $attributes = $pdoTracker->trackedAttributesForStatement($statement);
-                /** @psalm-suppress ArgumentTypeCoercion */
-                $builder = self::makeBuilder($instrumentation, 'PDOStatement::fetchAll', $function, $class, $filename, $lineno)
-                    ->setSpanKind(SpanKind::KIND_CLIENT)
-                    ->setAttributes($attributes);
-                if ($spanContext = $pdoTracker->getSpanForPreparedStatement($statement)) {
-                    $builder->addLink($spanContext);
-                }
-                $span = $builder->startSpan();
-
-                Context::storage()->attach($span->storeInContext(Context::getCurrent()));
-            },
-            post: static function (PDOStatement $statement, array $params, mixed $retval, ?Throwable $exception) {
-                self::end($exception);
-            }
-        );
-
-        hook(
-            PDOStatement::class,
-            'execute',
-            pre: static function (PDOStatement $statement, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($pdoTracker, $instrumentation) {
-                $attributes = $pdoTracker->trackedAttributesForStatement($statement);
-                /** @psalm-suppress ArgumentTypeCoercion */
-                $builder = self::makeBuilder($instrumentation, 'PDOStatement::execute', $function, $class, $filename, $lineno)
-                    ->setSpanKind(SpanKind::KIND_CLIENT)
-                    ->setAttributes($attributes);
-                if ($spanContext = $pdoTracker->getSpanForPreparedStatement($statement)) {
-                    $builder->addLink($spanContext);
-                }
-                $span = $builder->startSpan();
-
-                Context::storage()->attach($span->storeInContext(Context::getCurrent()));
-            },
-            post: static function (PDOStatement $statement, array $params, mixed $retval, ?Throwable $exception) {
+            post: static function (\Doctrine\DBAL\Driver\Connection $connection, array $params, mixed $statement, ?Throwable $exception) {
                 self::end($exception);
             }
         );
@@ -247,7 +183,6 @@ class PDOInstrumentation
         ?string $filename,
         ?int $lineno
     ): SpanBuilderInterface {
-        /** @psalm-suppress ArgumentTypeCoercion */
         return $instrumentation->tracer()
                     ->spanBuilder($name)
                     ->setAttribute(TraceAttributes::CODE_FUNCTION, $function)
