@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Opentelemetry\Contrib\Instrumentation\Doctrine;
+namespace OpenTelemetry\Contrib\Instrumentation\Doctrine;
 
 use OpenTelemetry\API\Trace\SpanContextInterface;
 use OpenTelemetry\SemConv\TraceAttributes;

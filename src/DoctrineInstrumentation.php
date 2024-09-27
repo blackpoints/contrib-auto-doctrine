@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Opentelemetry\Contrib\Instrumentation\Doctrine;
+namespace OpenTelemetry\Contrib\Instrumentation\Doctrine;
 
 use OpenTelemetry\API\Instrumentation\CachedInstrumentation;
 use OpenTelemetry\API\Trace\Span;
