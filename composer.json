@@ -1,5 +1,5 @@
 {
-    "name": "opentelemetry/opentelemetry-auto-doctrine",
+    "name": "open-telemetry/opentelemetry-auto-doctrine",
     "description": "OpenTelemetry auto-instrumentation for Doctrine",
     "keywords": [
         "opentelemetry",
