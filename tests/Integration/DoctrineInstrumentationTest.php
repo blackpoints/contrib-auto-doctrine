@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace OpenTelemetry\Tests\Instrumentation\Doctrine\Integration;
 
 use ArrayObject;
+use Doctrine\DBAL\DriverManager;
 use OpenTelemetry\API\Instrumentation\Configurator;
 use OpenTelemetry\Context\ScopeInterface;
 use OpenTelemetry\SDK\Trace\ImmutableSpan;
@@ -20,8 +21,18 @@ class DoctrineInstrumentationTest extends TestCase
     /** @var ArrayObject<int, ImmutableSpan> */
     private ArrayObject $storage;
 
-    private function createDB(): Connection
+    private function createConnection(): \Doctrine\DBAL\Connection
     {
+        $connectionParams = [
+            'driver' => 'sqlite3',
+            'memory' => true,
+        ];
+
+        $conn = DriverManager::getConnection($connectionParams);
+        // Trigger internal connect
+        $conn->getServerVersion();
+
+        return $conn;
     }
 
     private function fillDB(): string
@@ -60,129 +71,80 @@ class DoctrineInstrumentationTest extends TestCase
         $this->scope->detach();
     }
 
-    public function test_pdo_construct(): void
+    public function test_connection(): void
     {
         $this->assertCount(0, $this->storage);
-        self::createDB();
+        $conn = self::createConnection();
         $this->assertCount(1, $this->storage);
+        $this->assertTrue($conn->isConnected());
         $span = $this->storage->offsetGet(0);
-        $this->assertSame('PDO::__construct', $span->getName());
-        $this->assertEquals('sqlite', $span->getAttributes()->get(TraceAttributes::DB_SYSTEM));
+        $this->assertSame('Doctrine\DBAL\Driver::connect', $span->getName());
+        $this->assertEquals('sqlite3', $span->getAttributes()->get(TraceAttributes::DB_SYSTEM));
     }
 
-    public function test_constructor_exception(): void
+    public function test_connection_exception(): void
     {
-        $this->expectException(\PDOException::class);
-        $this->expectExceptionMessage('could not find driver');
-        new PDO('unknown:foo');
+        $this->expectException(\Doctrine\DBAL\Exception::class);
+        $this->expectExceptionMessageMatches('/The given driver "unknown" is unknown/');
+        /**
+         * @psalm-suppress InvalidArgument
+         * @phpstan-ignore argument.type
+        */
+        DriverManager::getConnection([
+            'driver' => 'unknown',
+        ]);
     }
 
     public function test_statement_execution(): void
     {
-        $db =  self::createDB();
+        $connection =  self::createConnection();
         $statement = self::fillDB();
 
-        $db->exec($statement);
+        $connection->executeStatement($statement);
         $span = $this->storage->offsetGet(1);
-        $this->assertSame('PDO::exec', $span->getName());
-        $this->assertEquals('sqlite', $span->getAttributes()->get(TraceAttributes::DB_SYSTEM));
-        $this->assertFalse($db->inTransaction());
+        $this->assertSame('Doctrine\DBAL\Driver\Connection::exec', $span->getName());
+        $this->assertFalse($connection->isTransactionActive());
         $this->assertCount(2, $this->storage);
 
-        $sth = $db->prepare('SELECT * FROM `technology`');
+        $connection->prepare('SELECT * FROM `technology`');
         $span = $this->storage->offsetGet(2);
-        $this->assertSame('PDO::prepare', $span->getName());
-        $this->assertEquals('sqlite', $span->getAttributes()->get(TraceAttributes::DB_SYSTEM));
+        $this->assertSame('Doctrine\DBAL\Driver\Connection::prepare', $span->getName());
         $this->assertCount(3, $this->storage);
 
-        $sth->execute();
+        $connection->executeQuery('SELECT * FROM `technology`');
         $span = $this->storage->offsetGet(3);
-        $this->assertSame('PDOStatement::execute', $span->getName());
-        $this->assertEquals('sqlite', $span->getAttributes()->get(TraceAttributes::DB_SYSTEM));
+        $this->assertSame('Doctrine\DBAL\Driver\Connection::query', $span->getName());
         $this->assertCount(4, $this->storage);
-
-        $sth->fetchAll();
-        $span = $this->storage->offsetGet(4);
-        $this->assertSame('PDOStatement::fetchAll', $span->getName());
-        $this->assertEquals('sqlite', $span->getAttributes()->get(TraceAttributes::DB_SYSTEM));
-        $this->assertCount(5, $this->storage);
-
-        $db->query('SELECT * FROM `technology`');
-        $span = $this->storage->offsetGet(5);
-        $this->assertSame('PDO::query', $span->getName());
-        $this->assertEquals('sqlite', $span->getAttributes()->get(TraceAttributes::DB_SYSTEM));
-        $this->assertCount(6, $this->storage);
     }
 
     public function test_transaction(): void
     {
-        $db =  self::createDB();
-        $result = $db->beginTransaction();
+        $connection =  self::createConnection();
+        $connection->beginTransaction();
         $span = $this->storage->offsetGet(1);
-        $this->assertSame('PDO::beginTransaction', $span->getName());
-        $this->assertEquals('sqlite', $span->getAttributes()->get(TraceAttributes::DB_SYSTEM));
+        $this->assertSame('Doctrine\DBAL\Driver\Connection::beginTransaction', $span->getName());
         $this->assertCount(2, $this->storage);
-        $this->assertSame($result, true);
 
         $statement = self::fillDB();
-        $db->exec($statement);
-        $result = $db->commit();
+        $connection->executeStatement($statement);
+        $span = $this->storage->offsetGet(2);
+        $this->assertSame('Doctrine\DBAL\Driver\Connection::exec', $span->getName());
+        $connection->commit();
         $span = $this->storage->offsetGet(3);
-        $this->assertSame('PDO::commit', $span->getName());
-        $this->assertEquals('sqlite', $span->getAttributes()->get(TraceAttributes::DB_SYSTEM));
+        $this->assertSame('Doctrine\DBAL\Driver\Connection::commit', $span->getName());
         $this->assertCount(4, $this->storage);
-        $this->assertTrue($result);
 
-        $result = $db->beginTransaction();
-        $this->assertTrue($result);
-        $this->assertTrue($db->inTransaction());
+        $connection->beginTransaction();
+        $this->assertTrue($connection->isTransactionActive());
 
-        $db->exec("INSERT INTO technology(`name`, `date`) VALUES('Java', '1995-05-23');");
-        $result = $db->rollback();
+        $connection->executeStatement("INSERT INTO technology(`name`, `date`) VALUES('Java', '1995-05-23');");
+        $connection->rollback();
         $span = $this->storage->offsetGet(6);
-        $this->assertSame('PDO::rollBack', $span->getName());
-        $this->assertEquals('sqlite', $span->getAttributes()->get(TraceAttributes::DB_SYSTEM));
+        $this->assertSame('Doctrine\DBAL\Driver\Connection::rollBack', $span->getName());
         $this->assertCount(7, $this->storage);
-        $this->assertTrue($result);
-        $this->assertFalse($db->inTransaction());
+        $this->assertFalse($connection->isTransactionActive());
 
-        $sth = $db->prepare('SELECT * FROM `technology`');
-        $sth->execute();
-        $this->assertSame(2, count($sth->fetchAll()));
-    }
-
-    public function test_execute_and_fetch_all_spans_linked_to_prepared_statement_span(): void
-    {
-        //setup
-        $db = self::createDB();
-        $this->assertCount(1, $this->storage, 'pdo constructor span');
-        $db->exec($this->fillDB());
-        $this->assertCount(2, $this->storage, 'pdo exec span');
-
-        //prepare query
-        $stmt = $db->prepare('select * from `technology`');
-        $this->assertCount(3, $this->storage, 'statement prepare span');
-        $prepareSpan = $this->storage->offsetGet(2);
-        $this->assertSame('PDO::prepare', $prepareSpan->getName());
-
-        //execute prepared query
-        $stmt->execute();
-        $this->assertCount(4, $this->storage, 'statement execute span');
-        $executeSpan = $this->storage->offsetGet(3);
-        $this->assertSame('PDOStatement::execute', $executeSpan->getName());
-
-        //verify prepared statement linked to execute
-        $this->assertCount(1, $executeSpan->getLinks());
-        $this->assertEquals($prepareSpan->getContext(), $executeSpan->getLinks()[0]->getSpanContext());
-
-        //fetch prepared query
-        $this->assertSame(2, count($stmt->fetchAll()));
-        $this->assertCount(5, $this->storage, 'statement fetchAll span');
-        $fetchAllSpan = $this->storage->offsetGet(4);
-        $this->assertSame('PDOStatement::fetchAll', $fetchAllSpan->getName());
-
-        //verify prepared statement linked to fetchAll
-        $this->assertCount(1, $fetchAllSpan->getLinks());
-        $this->assertEquals($prepareSpan->getContext(), $fetchAllSpan->getLinks()[0]->getSpanContext());
+        $sth = $connection->prepare('SELECT * FROM `technology`');
+        $this->assertSame(2, count($sth->executeQuery()->fetchAllAssociative()));
     }
 }
