@@ -30,9 +30,10 @@ class DoctrineInstrumentation
                 $builder = self::makeBuilder($instrumentation, 'Doctrine\DBAL\Driver::connect', $function, $class, $filename, $lineno)
                     ->setSpanKind(SpanKind::KIND_CLIENT);
                 $builder
-                    ->setAttribute(TraceAttributes::SERVER_ADDRESS, $params[0] ?? 'unknown')
-                    ->setAttribute(TraceAttributes::SERVER_PORT, $params[0] ?? 'unknown')
-                    ->setAttribute(TraceAttributes::DB_USER, $params[1] ?? 'unknown');
+                ->setAttribute(TraceAttributes::SERVER_ADDRESS, $params[0]['host'] ?? 'unknown')
+                ->setAttribute(TraceAttributes::SERVER_PORT, $params[0]['port'] ?? 'unknown')
+                ->setAttribute(TraceAttributes::DB_SYSTEM, $params[0]['driver'] ?? 'unknown')
+                ->setAttribute(TraceAttributes::DB_NAMESPACE, $params[0]['dbname'] ?? 'unknown');
                 $parent = Context::getCurrent();
                 $span = $builder->startSpan();
                 Context::storage()->attach($span->storeInContext($parent));
