@@ -29,10 +29,12 @@ class DoctrineInstrumentation
             pre: static function (\Doctrine\DBAL\Driver $driver, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($instrumentation) {
                 $builder = self::makeBuilder($instrumentation, 'Doctrine\DBAL\Driver::connect', $function, $class, $filename, $lineno)
                     ->setSpanKind(SpanKind::KIND_CLIENT);
+                $urlParams = parse_url($params[0]['url']);
+
                 $builder
-                    ->setAttribute(TraceAttributes::SERVER_ADDRESS, $params[0] ?? 'unknown')
-                    ->setAttribute(TraceAttributes::SERVER_PORT, $params[0] ?? 'unknown')
-                    ->setAttribute(TraceAttributes::DB_USER, $params[1] ?? 'unknown');
+                    ->setAttribute(TraceAttributes::SERVER_ADDRESS, $urlParams['host'] ?? 'unknown')
+                    ->setAttribute(TraceAttributes::SERVER_PORT, $urlParams['port'] ?? 'unknown')
+                    ->setAttribute(TraceAttributes::DB_SYSTEM, $urlParams['scheme'] ?? 'unknown');
                 $parent = Context::getCurrent();
                 $span = $builder->startSpan();
                 Context::storage()->attach($span->storeInContext($parent));
