@@ -10,11 +10,10 @@ use OpenTelemetry\API\Trace\SpanBuilderInterface;
 use OpenTelemetry\API\Trace\SpanKind;
 use OpenTelemetry\API\Trace\StatusCode;
 use OpenTelemetry\Context\Context;
-
-use function OpenTelemetry\Instrumentation\hook;
-
 use OpenTelemetry\SemConv\TraceAttributes;
 use Throwable;
+
+use function OpenTelemetry\Instrumentation\hook;
 
 class DoctrineInstrumentation
 {
@@ -30,12 +29,11 @@ class DoctrineInstrumentation
             pre: static function (\Doctrine\DBAL\Driver $driver, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($instrumentation) {
                 /** @psalm-suppress ArgumentTypeCoercion */
                 $builder = self::makeBuilder($instrumentation, 'Doctrine\DBAL\Driver::connect', $function, $class, $filename, $lineno)
-                    ->setSpanKind(SpanKind::KIND_CLIENT);
-                $builder
-                    ->setAttribute(TraceAttributes::SERVER_ADDRESS, $params[0]['host'] ?? 'unknown')
-                    ->setAttribute(TraceAttributes::SERVER_PORT, $params[0]['port'] ?? 'unknown')
-                    ->setAttribute(TraceAttributes::DB_SYSTEM, $params[0]['driver'] ?? 'unknown')
-                    ->setAttribute(TraceAttributes::DB_NAMESPACE, $params[0]['dbname'] ?? 'unknown');
+                ->setSpanKind(SpanKind::KIND_CLIENT)
+                ->setAttribute(TraceAttributes::SERVER_ADDRESS, AttributesResolver::get(TraceAttributes::SERVER_ADDRESS, func_get_args()))
+                ->setAttribute(TraceAttributes::SERVER_PORT, AttributesResolver::get(TraceAttributes::SERVER_PORT, func_get_args()))
+                ->setAttribute(TraceAttributes::DB_SYSTEM, AttributesResolver::get(TraceAttributes::DB_SYSTEM, func_get_args()))
+                ->setAttribute(TraceAttributes::DB_NAMESPACE, AttributesResolver::get(TraceAttributes::DB_NAMESPACE, func_get_args()));
                 $parent = Context::getCurrent();
                 $span = $builder->startSpan();
                 Context::storage()->attach($span->storeInContext($parent));
@@ -56,7 +54,7 @@ class DoctrineInstrumentation
                 /** @psalm-suppress ArgumentTypeCoercion */
                 $builder = self::makeBuilder($instrumentation, 'Doctrine\DBAL\Driver\Connection::query', $function, $class, $filename, $lineno)
                     ->setSpanKind(SpanKind::KIND_CLIENT);
-                $builder->setAttribute(TraceAttributes::DB_QUERY_TEXT, $params[0] ?? 'undefined');
+                $builder->setAttribute(TraceAttributes::DB_QUERY_TEXT, AttributesResolver::get(TraceAttributes::DB_QUERY_TEXT, func_get_args()));
                 $parent = Context::getCurrent();
                 $span = $builder->startSpan();
                 Context::storage()->attach($span->storeInContext($parent));
@@ -70,10 +68,9 @@ class DoctrineInstrumentation
             \Doctrine\DBAL\Driver\Connection::class,
             'exec',
             pre: static function (\Doctrine\DBAL\Driver\Connection $connection, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($instrumentation) {
-                /** @psalm-suppress ArgumentTypeCoercion */
                 $builder = self::makeBuilder($instrumentation, 'Doctrine\DBAL\Driver\Connection::exec', $function, $class, $filename, $lineno)
-                    ->setSpanKind(SpanKind::KIND_CLIENT);
-                $builder->setAttribute(TraceAttributes::DB_QUERY_TEXT, $params[0] ?? 'undefined');
+                    ->setSpanKind(SpanKind::KIND_CLIENT)
+                    ->setAttribute(TraceAttributes::DB_QUERY_TEXT, AttributesResolver::get(TraceAttributes::DB_QUERY_TEXT, func_get_args()));
                 $parent = Context::getCurrent();
                 $span = $builder->startSpan();
 
@@ -90,8 +87,8 @@ class DoctrineInstrumentation
             pre: static function (\Doctrine\DBAL\Driver\Connection $connection, array $params, string $class, string $function, ?string $filename, ?int $lineno) use ($instrumentation) {
                 /** @psalm-suppress ArgumentTypeCoercion */
                 $builder = self::makeBuilder($instrumentation, 'Doctrine\DBAL\Driver\Connection::prepare', $function, $class, $filename, $lineno)
-                    ->setSpanKind(SpanKind::KIND_CLIENT);
-                $builder->setAttribute(TraceAttributes::DB_QUERY_TEXT, $params[0] ?? 'undefined');
+                    ->setSpanKind(SpanKind::KIND_CLIENT)
+                    ->setAttribute(TraceAttributes::DB_QUERY_TEXT, AttributesResolver::get(TraceAttributes::DB_QUERY_TEXT, func_get_args()));
                 $parent = Context::getCurrent();
                 $span = $builder->startSpan();
 
